@@ -29,15 +29,14 @@ Relevant code: `src/main.jsx`, especially `updateGame`, `drawPlayer`, `drawEnemy
 
 ### 2. Implement the ladders
 
-Ladders are currently drawn but do not have gameplay functionality. Add:
+Implemented in the current prototype:
 
-- Ladder collision zones.
+- Ladder interaction zones at the top and bottom platforms.
 - Climbing with `W`, `S`, `ArrowUp`, and `ArrowDown`.
-- Reduced or disabled gravity while climbing.
-- Jumping off ladders.
-- Optional enemy ladder behavior.
+- Gravity disabled while the player is climbing.
+- A dedicated ladder pose and automatic stopping at each platform.
 
-This will make the vertical temple layout much more meaningful.
+Future polish could add jumping off ladders and optional enemy ladder behavior.
 
 ### 3. Give enemies distinct behavior
 
@@ -52,7 +51,7 @@ Also add patrol areas, attack cooldowns, knockback, alert indicators, and platfo
 
 ### 4. Improve progression and level selection
 
-The map displays four levels, but only level 1 is selectable. Level 2 is entered automatically through the door, while levels 3 and 4 are decorative.
+The map now supports four sequential levels. Each cleared chamber unlocks the next, and unlocked nodes can be selected directly.
 
 Recommended changes:
 
@@ -76,7 +75,7 @@ Example:
 
 ### 5. Make the Lava Vault visually different
 
-Level 2 is labeled `LAVA VAULT`, but currently reuses the same environment and layout as level 1.
+Levels 2–4 have their own progression, enemy rosters, and collectibles, but currently reuse the same environment and layout as level 1.
 
 Add:
 
@@ -96,9 +95,9 @@ drawBackground(ctx, now, game.level)
 
 ## Current gameplay issues to fix
 
-### Ladders are visual only
+### Ladder movement is intentionally simple
 
-`drawLadder` renders ladders, but `updateGame` does not implement climbing.
+Ladders are functional and connect the temple platforms. The player must hold `W`/`ArrowUp` or `S`/`ArrowDown` while aligned with a ladder; jumping off ladders and enemy ladder behavior remain future polish.
 
 ### The mute button does not mute anything
 
@@ -175,7 +174,7 @@ Score: 2,450
 
 ## Controls and accessibility
 
-- Add `S` and `ArrowDown` for ladders.
+- `S` and `ArrowDown` now climb ladders downward.
 - Document keyboard shooting with `X` and `J`.
 - Add visible keyboard focus styles.
 - Add mobile buttons or a virtual joystick.

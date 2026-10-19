@@ -7,25 +7,28 @@ This repository contains a small React/Vite playable prototype with a custom Can
 ## Features
 
 - Pixel-art-inspired temple setting rendered with the HTML Canvas API
-- Platforming with movement, jumping, temple platforms, and an exit door
+- Platforming with movement, jumping, climbable ladders, temple platforms, and an exit door
 - Mouse aiming and hold-to-fire shooting
 - Keyboard movement and shooting controls
 - Enemy guardians with different visual types: crabs, tortoises, and guardians
-- Health, ammunition, score, and guardian progress HUD
+- Health, ammunition, score, coin collection, and guardian progress HUD
+- Animated gold coins placed throughout each chamber; collecting one awards 50 points
 - Home screen, level map, pause screen, and victory screen
-- Two playable chambers in the current prototype:
+- Four playable chambers in the current prototype:
   - **Temple Gate** — the opening chamber with two guardians
   - **Lava Vault** — unlocked after clearing Temple Gate, with a larger guardian roster
+  - **Sunken Ruins** — a deeper chamber with additional guardians and collectibles
+  - **Final Tomb** — the final chamber with the largest guardian roster
 - Responsive layout around a fixed 960 × 540 game canvas
 
 ## How to play
 
 1. Launch the game and choose **Start Game** or **Quick Start**.
-2. Move through the temple using the platforms and ladders.
+2. Move through the temple using the platforms and ladders. When you reach a ladder, hold `W` or `↑` to climb up; hold `S` or `↓` to climb down.
 3. Aim with the mouse and click or hold the left mouse button to fire.
 4. Defeat every guardian in the chamber.
 5. When the door opens, move to the door on the right and press **Up**, **W**, or **Enter** to continue.
-6. Clear the final chamber to win the run.
+6. Clear the Final Tomb to win the run.
 
 ### Controls
 
@@ -33,6 +36,7 @@ This repository contains a small React/Vite playable prototype with a custom Can
 | --- | --- |
 | Move left/right | `A` / `D` or `←` / `→` |
 | Jump | `W`, `↑`, or `Space` |
+| Climb ladders | Hold `W` / `↑` up, or `S` / `↓` down |
 | Aim | Mouse cursor |
 | Fire | Hold left mouse button, `X`, or `J` |
 | Pause/resume | `P` |
@@ -96,12 +100,11 @@ The game currently uses no external art, audio, or game engine. Visuals are gene
 
 This is an early playable prototype. Some interface and gameplay elements are intentionally incomplete:
 
-- Ladders are currently visual elements rather than fully implemented climbing surfaces.
+- Coins are collected per run and are not yet persisted as a long-term completion record.
 - The mute button is present, but audio has not yet been added.
 - Ammunition is limited and does not currently replenish through pickups or reloading.
 - Losing all health resets the chamber instead of showing a dedicated game-over screen.
-- The level map displays future chambers, but only the current progression path is playable.
-- Level 2 currently reuses the temple layout and visual treatment instead of having a fully distinct lava environment.
+- Levels 2–4 currently reuse the temple layout and visual treatment instead of having fully distinct environments.
 - The footer's “High Score” value currently reflects the active run score rather than a saved best score.
 
 See [`game-improvement-plan.md`](./game-improvement-plan.md) for planned improvements and design notes.
