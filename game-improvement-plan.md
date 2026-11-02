@@ -40,7 +40,7 @@ Future polish could add jumping off ladders and optional enemy ladder behavior.
 
 ### 3. Give enemies distinct behavior
 
-Enemies currently mostly move toward the player and cause contact damage. Give each enemy a clear role:
+Enemies mostly move toward the player and cause contact damage. Guardian ranged attacks are implemented from Chamber 6 onward with visible telegraphs. Continue giving each enemy a clear role:
 
 - **Crab:** fast melee enemy.
 - **Tortoise:** slow armored enemy requiring more shots or positioning.
@@ -51,7 +51,7 @@ Also add patrol areas, attack cooldowns, knockback, alert indicators, and platfo
 
 ### 4. Improve progression and level selection
 
-The map now supports four sequential levels. Each cleared chamber unlocks the next, and unlocked nodes can be selected directly.
+The map now supports twenty-five sequential chambers. Each cleared chamber unlocks the next, progress is saved locally, and unlocked nodes can be selected directly.
 
 Recommended changes:
 
@@ -103,18 +103,17 @@ Ladders are functional and connect the temple platforms. The player must hold `W
 
 The `muted` React state changes, but there is no audio system. Add audio or hide the button until audio is implemented.
 
-### Ammo never replenishes
+### Ammo and health pickups
 
-The player starts with limited ammunition, but there are no ammo pickups or reload mechanics. Add ammo crates, enemy drops, reloads, or additional weapon types.
+Implemented: collectible ammo crates and heart pickups are placed throughout each chamber. Walking over an ammo crate restores bullets; walking over a heart restores one lost heart. Both award bonus score, and heart pickups remain available while health is full.
 
-### There is no proper game-over state
+### Game-over flow
 
-When all hearts are lost, `damagePlayer` silently resets the enemies. A finished game should show:
+Implemented: when all hearts are lost, the run now stops and shows a `Temple Lost` screen with:
 
-- A `Temple Lost` screen.
-- Restart and checkpoint options.
-- A score summary.
-- The best score.
+- A chamber restart option.
+- A return-home option.
+- The current chamber and run context.
 
 ### Bullets pass through platforms
 
@@ -152,6 +151,7 @@ Give players reasons to explore instead of rushing to the exit:
 - Secret rooms.
 - Relics and gold collectibles.
 - Hidden ammo caches.
+- Breakable bricks with growth and shield power-ups.
 - Health upgrades.
 - Optional challenge rooms.
 - Time bonuses.
@@ -238,7 +238,7 @@ Also update the static home-screen statistics. For example, `LEVELS OPEN` should
 2. Add shooting feedback, enemy hit reactions, and sound.
 2. Implement functional ladders.
 3. Add ammo and health pickups.
-4. Add ranged enemy attacks.
+4. Add ranged enemy attacks (implemented for guardians from Chamber 6 onward).
 5. Add a proper game-over screen.
 6. Make level 2 visually unique.
 7. Make map nodes selectable.

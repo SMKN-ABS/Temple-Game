@@ -4,18 +4,26 @@ import './styles.css'
 
 const CANVAS_WIDTH = 960
 const CANVAS_HEIGHT = 540
-const MAX_LEVEL = 4
+const MAX_LEVEL = 25
+const MAX_HEARTS = 3
+const OUTFIT_COST = 100
 const levelNames = {
   1: 'TEMPLE GATE',
   2: 'LAVA VAULT',
-  3: 'SUNKEN RUINS',
-  4: 'FINAL TOMB',
+}
+
+function getLevelName(level = 1) {
+  return levelNames[level] || `CHAMBER ${String(level).padStart(2, '0')}`
+}
+
+function getStartingAmmo(level = 1) {
+  return 18 + (level - 1) * 8
 }
 
 const initialHud = {
   score: 0,
   ammo: 18,
-  hearts: 3,
+  hearts: MAX_HEARTS,
   level: 1,
   kills: 0,
   total: 8,
@@ -51,6 +59,56 @@ function makeKey(level = 1) {
   return { x: 780, y: 385, level, collected: false }
 }
 
+function makeFireballs(level = 1) {
+  if (level < 4) return []
+  // Final Tomb and later chambers add rolling hazards to the ground.
+  const count = Math.min(4, 2 + Math.floor((level - 4) / 5))
+  return Array.from({ length: count }, (_, index) => ({
+    id: index,
+    x: 1010 + index * 360,
+    y: 478,
+    radius: 13,
+    speed: 3.1 + (level - 4) * 0.08 + index * 0.45,
+    angle: 0,
+  }))
+}
+
+function makeAmmoPickups(level = 1) {
+  const pickups = [
+    { x: 205, y: 397 },
+    { x: 470, y: 362 },
+    { x: 790, y: 397 },
+    { x: 325, y: 277 },
+  ]
+  const count = level === 1 ? 1 : level < 4 ? 2 : 3
+  return pickups.slice(0, count).map((pickup, index) => ({
+    ...pickup,
+    id: index,
+    amount: 8 + Math.floor(level / 5),
+    collected: false,
+  }))
+}
+
+function makeHealthPickups(level = 1) {
+  const pickups = [
+    { x: 110, y: 397 },
+    { x: 540, y: 242 },
+    { x: 680, y: 182 },
+  ]
+  const count = level === 1 ? 1 : level < 4 ? 2 : 3
+  return pickups.slice(0, count).map((pickup, index) => ({ ...pickup, id: index, collected: false }))
+}
+
+function makeBreakableBricks(level = 1) {
+  const bricks = [
+    { x: 285, y: 350, reward: 'growth' },
+    { x: 595, y: 230, reward: 'shield' },
+    { x: 805, y: 275, reward: 'growth' },
+  ]
+  const count = level === 1 ? 1 : level < 4 ? 2 : 3
+  return bricks.slice(0, count).map((brick, index) => ({ ...brick, id: index, w: 32, h: 18, broken: false }))
+}
+
 function makeEnemies(level = 1) {
   const enemies = [
     { x: 115, y: 378, w: 34, h: 38, vx: 0, vy: 0, hp: 2, alive: true, dir: 1, type: 'crab', color: '#df684e' },
@@ -66,10 +124,18 @@ function makeEnemies(level = 1) {
     { x: 150, y: 143, w: 34, h: 38, vx: 0, vy: 0, hp: 2, alive: true, dir: -1, type: 'crab', color: '#ad514e' },
     { x: 760, y: 228, w: 34, h: 38, vx: 0, vy: 0, hp: 3, alive: true, dir: 1, type: 'guardian', color: '#b07848' },
   ]
-  if (level === 1) return enemies.slice(0, 2)
-  if (level === 2) return enemies.slice(0, 8)
-  if (level === 3) return enemies.slice(0, 10)
-  return enemies
+  // Chamber 6 introduces lava and guardian projectiles, so keep its enemy count readable.
+  const count = level === 1 ? 2 : level === 2 ? 8 : level === 3 ? 10 : level === 6 ? 6 : 12
+  const healthBonus = level >= 18 ? 2 : level >= 10 ? 1 : 0
+  const speedBonus = Math.min(0.55, Math.max(0, level - 4) * 0.025)
+  return enemies.slice(0, count).map((enemy, index) => ({
+    ...enemy,
+    hp: enemy.hp + healthBonus,
+    maxHp: enemy.hp + healthBonus,
+    speed: 0.7 + speedBonus,
+    shotTimer: 900 + index * 260,
+    attackFlash: 0,
+  }))
 }
 
 const platforms = [
@@ -85,6 +151,22 @@ const platforms = [
   { x: 615, y: 205, w: 190, h: 18 },
   { x: 385, y: 100, w: 210, h: 18 },
 ]
+
+function getPlatforms(level = 1) {
+  if (level !== 6) return platforms
+  // Level 6 replaces the solid floor with raised stepping stones over lava.
+  return [
+    ...platforms.filter((platform) => platform.y < 500),
+    { x: 0, y: 500, w: 90, h: 18 },
+    { x: 120, y: 455, w: 92, h: 16 },
+    { x: 242, y: 420, w: 88, h: 16 },
+    { x: 360, y: 455, w: 92, h: 16 },
+    { x: 480, y: 420, w: 88, h: 16 },
+    { x: 598, y: 455, w: 92, h: 16 },
+    { x: 718, y: 420, w: 88, h: 16 },
+    { x: 836, y: 455, w: 124, h: 16 },
+  ]
+}
 
 const ladders = [
   { x: 225, y: 300, h: 120 },
@@ -106,6 +188,30 @@ function drawText(ctx, text, x, y, size, color, align = 'left') {
   ctx.fillStyle = color
   ctx.fillText(text, x, y)
   ctx.restore()
+}
+
+function drawVolcanicFloor(ctx, time) {
+  const lavaGradient = ctx.createLinearGradient(0, 475, 0, CANVAS_HEIGHT)
+  lavaGradient.addColorStop(0, '#e15d32')
+  lavaGradient.addColorStop(0.35, '#9d302d')
+  lavaGradient.addColorStop(1, '#351a2b')
+  ctx.fillStyle = lavaGradient
+  ctx.fillRect(0, 475, CANVAS_WIDTH, 65)
+  ctx.fillStyle = '#ffb43f'
+  ctx.globalAlpha = 0.75
+  for (let x = -20; x < CANVAS_WIDTH + 30; x += 74) {
+    const wave = Math.sin(time * 0.004 + x) * 5
+    ctx.fillRect(x, 478 + wave, 42, 3)
+  }
+  ctx.globalAlpha = 1
+  // Distant volcanic vents and bursts make the lower room read as dangerous.
+  ctx.fillStyle = '#351b2a'
+  ctx.beginPath(); ctx.moveTo(430, 475); ctx.lineTo(470, 410); ctx.lineTo(512, 475); ctx.closePath(); ctx.fill()
+  ctx.fillStyle = '#f58a35'
+  ctx.fillRect(469, 422, 6, 12); ctx.fillRect(480, 433, 4, 9)
+  ctx.fillStyle = '#ffcb58'
+  ctx.fillRect(466, 411 + Math.round(Math.sin(time * 0.008) * 4), 5, 7)
+  ctx.fillRect(487, 421 + Math.round(Math.sin(time * 0.01 + 1) * 3), 4, 6)
 }
 
 function drawBackground(ctx, time) {
@@ -210,31 +316,47 @@ function drawLadder(ctx, ladder) {
   ctx.fillRect(ladder.x + 2, ladder.y, 3, ladder.h)
 }
 
-function drawPlayer(ctx, player, time, aimPoint) {
+function drawPlayer(ctx, player, time, aimPoint, dress = 'explorer') {
   const bob = player.onGround ? Math.sin(time * 0.012) * 1 : 0
+  const outfit = dress === 'golden'
+    ? { backpack: '#6d5427', backpackHighlight: '#d7b24f', boots: '#3b2e23', hoodie: '#d6a83f', hoodieHighlight: '#ffe08a', shorts: '#5a4528', hair: '#382b26', cap: '#b9852f', accent: '#fff0a2' }
+    : { backpack: '#2e5571', backpackHighlight: '#477493', boots: '#151827', hoodie: '#d15c68', hoodieHighlight: '#ef8b70', shorts: '#252a3d', hair: '#252a3d', cap: '#bd5360', accent: '#e6b66a' }
   const x = Math.round(player.x), y = Math.round(player.y + bob)
   const aimAngle = aimPoint ? Math.atan2(aimPoint.y - (y + 25), aimPoint.x - (x + 15)) : (player.dir > 0 ? 0 : Math.PI)
   ctx.save()
   if (player.invuln > 0 && Math.floor(time / 90) % 2 === 0) ctx.globalAlpha = 0.4
+  if (player.grown) {
+    ctx.translate(x + 15, y + 43)
+    ctx.scale(1.15, 1.15)
+    ctx.translate(-(x + 15), -(y + 43))
+  }
+  if (player.shield > 0) {
+    ctx.save()
+    ctx.globalAlpha = 0.32 + Math.sin(time * 0.01) * 0.08
+    ctx.strokeStyle = '#8ef0e5'
+    ctx.lineWidth = 3
+    ctx.beginPath(); ctx.arc(x + 15, y + 24, 31, 0, Math.PI * 2); ctx.stroke()
+    ctx.restore()
+  }
   // Small backpack makes the playable character read as a young explorer.
-  ctx.fillStyle = '#2e5571'; ctx.fillRect(x + (player.dir < 0 ? 22 : -2), y + 18, 9, 16)
-  ctx.fillStyle = '#477493'; ctx.fillRect(x + (player.dir < 0 ? 25 : -4), y + 21, 4, 8)
+  ctx.fillStyle = outfit.backpack; ctx.fillRect(x + (player.dir < 0 ? 22 : -2), y + 18, 9, 16)
+  ctx.fillStyle = outfit.backpackHighlight; ctx.fillRect(x + (player.dir < 0 ? 25 : -4), y + 21, 4, 8)
   // Short legs and chunky boots.
   ctx.fillStyle = '#29324a'; ctx.fillRect(x + 8, y + 32, 7, 8); ctx.fillRect(x + 18, y + 32, 7, 8)
-  ctx.fillStyle = '#151827'; ctx.fillRect(x + 5, y + 39, 11, 4); ctx.fillRect(x + 17, y + 39, 11, 4)
+  ctx.fillStyle = outfit.boots; ctx.fillRect(x + 5, y + 39, 11, 4); ctx.fillRect(x + 17, y + 39, 11, 4)
   // Bright hoodie and little shorts.
-  ctx.fillStyle = '#d15c68'; ctx.fillRect(x + 6, y + 18, 20, 16)
-  ctx.fillStyle = '#ef8b70'; ctx.fillRect(x + 8, y + 20, 4, 10)
-  ctx.fillStyle = '#252a3d'; ctx.fillRect(x + 8, y + 31, 7, 5); ctx.fillRect(x + 18, y + 31, 7, 5)
-  ctx.fillStyle = '#e6b66a'; ctx.fillRect(x + 13, y + 26, 6, 5)
+  ctx.fillStyle = outfit.hoodie; ctx.fillRect(x + 6, y + 18, 20, 16)
+  ctx.fillStyle = outfit.hoodieHighlight; ctx.fillRect(x + 8, y + 20, 4, 10)
+  ctx.fillStyle = outfit.shorts; ctx.fillRect(x + 8, y + 31, 7, 5); ctx.fillRect(x + 18, y + 31, 7, 5)
+  ctx.fillStyle = outfit.accent; ctx.fillRect(x + 13, y + 26, 6, 5)
   // Oversized kid face, hair, and cap.
   ctx.fillStyle = '#e6b66a'; ctx.fillRect(x + 6, y + 3, 20, 19)
-  ctx.fillStyle = '#252a3d'; ctx.fillRect(x + 5, y + 1, 22, 7); ctx.fillRect(x + 8, y - 3, 15, 4)
-  ctx.fillStyle = '#bd5360'; ctx.fillRect(player.dir > 0 ? x + 23 : x + 3, y + 5, 5, 4)
+  ctx.fillStyle = outfit.hair; ctx.fillRect(x + 5, y + 1, 22, 7); ctx.fillRect(x + 8, y - 3, 15, 4)
+  ctx.fillStyle = outfit.cap; ctx.fillRect(player.dir > 0 ? x + 23 : x + 3, y + 5, 5, 4)
   ctx.fillStyle = '#141827'; ctx.fillRect(player.dir > 0 ? x + 21 : x + 8, y + 11, 3, 3)
   // A ladder pose makes the young explorer's movement clear.
   if (player.onLadder) {
-    ctx.fillStyle = '#e6b66a'
+    ctx.fillStyle = outfit.accent
     ctx.fillRect(x + 1, y + 20, 7, 4)
     ctx.fillRect(x + 22, y + 20, 7, 4)
     ctx.fillStyle = '#29324a'
@@ -262,6 +384,91 @@ function drawCrosshair(ctx, point) {
   ctx.beginPath(); ctx.arc(0, 0, point.down ? 9 : 11, 0, Math.PI * 2); ctx.stroke()
   ctx.fillStyle = '#f0d487'; ctx.fillRect(-2, -2, 4, 4)
   ctx.beginPath(); ctx.moveTo(-16, 0); ctx.lineTo(-7, 0); ctx.moveTo(7, 0); ctx.lineTo(16, 0); ctx.moveTo(0, -16); ctx.lineTo(0, -7); ctx.moveTo(0, 7); ctx.lineTo(0, 16); ctx.stroke()
+  ctx.restore()
+}
+
+function drawFireball(ctx, fireball, time) {
+  const x = Math.round(fireball.x)
+  const y = Math.round(fireball.y + Math.sin(time * 0.012 + fireball.id) * 1.5)
+  const r = fireball.radius
+  ctx.save()
+  ctx.globalAlpha = 0.28
+  ctx.fillStyle = '#e66b3d'
+  ctx.beginPath(); ctx.ellipse(x - 9, y + 14, 24, 5, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.globalAlpha = 1
+  // A short flame trail makes the direction of the rolling hazard readable.
+  ctx.fillStyle = '#b64032'
+  ctx.beginPath(); ctx.moveTo(x - r + 3, y - 5); ctx.lineTo(x - r - 18, y); ctx.lineTo(x - r + 3, y + 6); ctx.closePath(); ctx.fill()
+  ctx.translate(x, y)
+  ctx.rotate(fireball.angle)
+  ctx.fillStyle = '#8f302d'; ctx.beginPath(); ctx.arc(0, 0, r + 2, 0, Math.PI * 2); ctx.fill()
+  ctx.fillStyle = '#e75d35'; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill()
+  ctx.fillStyle = '#ffb83f'; ctx.fillRect(-5, -7, 10, 12)
+  ctx.fillStyle = '#ffe58a'; ctx.fillRect(-3, -5, 5, 6)
+  ctx.restore()
+}
+
+function drawAmmoPickup(ctx, pickup, time) {
+  if (pickup.collected) return
+  const bob = Math.sin(time * 0.006 + pickup.x) * 2
+  const x = Math.round(pickup.x)
+  const y = Math.round(pickup.y + bob)
+  ctx.save()
+  ctx.fillStyle = 'rgba(10, 15, 27, .6)'
+  ctx.fillRect(x - 16, y + 9, 32, 4)
+  ctx.fillStyle = '#3a6d7d'; ctx.fillRect(x - 13, y - 10, 26, 19)
+  ctx.fillStyle = '#8ed0c4'; ctx.fillRect(x - 10, y - 7, 20, 3)
+  ctx.fillStyle = '#183342'; ctx.fillRect(x - 8, y - 2, 16, 8)
+  ctx.fillStyle = '#f0d487'; ctx.fillRect(x - 5, y - 1, 3, 6); ctx.fillRect(x + 2, y - 1, 3, 6)
+  ctx.fillStyle = '#b6f0d2'; ctx.fillRect(x - 4, y - 8, 8, 2)
+  ctx.restore()
+}
+
+function drawHealthPickup(ctx, pickup, time) {
+  if (pickup.collected) return
+  const bob = Math.sin(time * 0.006 + pickup.x) * 2
+  const x = Math.round(pickup.x)
+  const y = Math.round(pickup.y + bob)
+  ctx.save()
+  ctx.fillStyle = 'rgba(10, 15, 27, .6)'; ctx.fillRect(x - 16, y + 9, 32, 4)
+  ctx.fillStyle = '#663d50'; ctx.fillRect(x - 13, y - 10, 26, 19)
+  ctx.strokeStyle = '#e56c61'; ctx.strokeRect(x - 12.5, y - 9.5, 25, 18)
+  drawHeart(ctx, x, y - 1, true)
+  ctx.restore()
+}
+
+function drawBreakableBrick(ctx, brick, time) {
+  if (brick.broken) return
+  const shimmer = Math.sin(time * 0.006 + brick.x) * 0.08 + 0.92
+  ctx.save()
+  ctx.globalAlpha = shimmer
+  ctx.fillStyle = '#9b583c'; ctx.fillRect(brick.x, brick.y, brick.w, brick.h)
+  ctx.fillStyle = '#d58b4f'; ctx.fillRect(brick.x + 2, brick.y + 2, brick.w - 4, 4)
+  ctx.fillStyle = '#693d38'; ctx.fillRect(brick.x + 5, brick.y + 8, 3, 8); ctx.fillRect(brick.x + 19, brick.y + 7, 3, 9)
+  ctx.fillStyle = '#f0b15a'; ctx.fillRect(brick.x + 2, brick.y + 16, brick.w - 4, 2)
+  ctx.restore()
+}
+
+function drawPowerup(ctx, powerup, time) {
+  if (powerup.collected) return
+  const bob = Math.sin(time * 0.007 + powerup.x) * 3
+  const x = Math.round(powerup.x)
+  const y = Math.round(powerup.y + bob)
+  ctx.save()
+  ctx.globalAlpha = 0.25
+  ctx.fillStyle = powerup.type === 'growth' ? '#eac25b' : '#76d4d2'
+  ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI * 2); ctx.fill()
+  ctx.globalAlpha = 1
+  if (powerup.type === 'growth') {
+    ctx.fillStyle = '#eac25b'; ctx.fillRect(x - 8, y - 9, 16, 17)
+    ctx.fillStyle = '#fff0a2'; ctx.fillRect(x - 4, y - 6, 8, 4)
+    ctx.fillStyle = '#8e6230'; ctx.fillRect(x - 8, y + 5, 16, 3)
+  } else {
+    ctx.strokeStyle = '#9ff5ea'; ctx.lineWidth = 3
+    ctx.beginPath(); ctx.arc(x, y + 2, 9, 0, Math.PI * 2); ctx.stroke()
+    ctx.fillStyle = '#58bfc0'; ctx.fillRect(x - 5, y - 9, 10, 7)
+    ctx.fillStyle = '#d7ffff'; ctx.fillRect(x - 3, y - 8, 6, 2)
+  }
   ctx.restore()
 }
 
@@ -310,9 +517,10 @@ function drawEnemy(ctx, enemy, time) {
 }
 
 function drawEnemyHealth(ctx, enemy, x, y) {
-  if (enemy.hp < 2) {
+  const maxHp = enemy.maxHp || 2
+  if (enemy.hp < maxHp) {
     ctx.fillStyle = '#efb956'; ctx.fillRect(x + 5, y - 7, 24, 3)
-    ctx.fillStyle = '#bc4b4c'; ctx.fillRect(x + 5, y - 7, 12, 3)
+    ctx.fillStyle = '#bc4b4c'; ctx.fillRect(x + 5, y - 7, 24 * (enemy.hp / maxHp), 3)
   }
 }
 
@@ -365,6 +573,13 @@ function drawGuardian(ctx, enemy, time) {
   ctx.fillStyle = '#e6b66a'; ctx.fillRect(x + 7, y + 9 + wobble, 17, 10)
   ctx.fillStyle = '#efce7a'; ctx.fillRect(x + 9, y + 11 + wobble, 3, 3); ctx.fillRect(x + 18, y + 11 + wobble, 3, 3)
   ctx.fillStyle = '#25293a'; ctx.fillRect(enemy.dir > 0 ? x + 28 : x - 8, y + 20, 11, 5)
+  if (enemy.attackFlash > 0 || (enemy.shotTimer > 0 && enemy.shotTimer < 380)) {
+    ctx.strokeStyle = '#ffdc77'
+    ctx.lineWidth = 2
+    ctx.globalAlpha = enemy.attackFlash > 0 ? 1 : 0.55
+    ctx.beginPath(); ctx.arc(x + 17, y + 16, 22, 0, Math.PI * 2); ctx.stroke()
+    ctx.globalAlpha = 1
+  }
   drawEnemyHealth(ctx, enemy, x, y)
 }
 
@@ -404,7 +619,7 @@ function drawCanvasHud(ctx, hud) {
   ctx.fillStyle = 'rgba(10, 15, 27, .88)'; ctx.fillRect(18, 16, 924, 58)
   ctx.strokeStyle = '#4d5a76'; ctx.lineWidth = 1; ctx.strokeRect(18.5, 16.5, 923, 57)
   drawText(ctx, `SECTOR ${String(hud.level || 1).padStart(2, '0')}`, 35, 36, 11, '#8793af')
-  drawText(ctx, levelNames[hud.level] || `CHAMBER ${hud.level}`, 35, 55, 16, '#f0d487')
+  drawText(ctx, getLevelName(hud.level), 35, 55, 16, '#f0d487')
   ctx.fillStyle = '#3a435b'; ctx.fillRect(181, 31, 118, 9)
   ctx.fillStyle = '#d5a94e'; ctx.fillRect(181, 31, 118 * (hud.kills / hud.total), 9)
   drawText(ctx, `${hud.kills}/${hud.total} GUARDIANS`, 181, 57, 10, '#aeb8ca')
@@ -413,10 +628,10 @@ function drawCanvasHud(ctx, hud) {
   drawText(ctx, 'SCORE', 650, 35, 10, '#8793af')
   drawText(ctx, String(hud.score).padStart(5, '0'), 650, 55, 17, '#f0d487')
   drawText(ctx, 'HEALTH', 833, 35, 10, '#8793af')
-  for (let i = 0; i < 3; i++) drawHeart(ctx, 853 + i * 19, 52, i < hud.hearts)
+  for (let i = 0; i < MAX_HEARTS; i++) drawHeart(ctx, 853 + i * 19, 52, i < hud.hearts)
 }
 
-function TempleCanvas({ running, paused, onScore, onHud, onWin, onDoorEnter, resetKey, level }) {
+function TempleCanvas({ running, paused, onScore, onHud, onWin, onDoorEnter, onCoinCollected, onGameOver, resetKey, level, dress }) {
   const canvasRef = useRef(null)
   const keysRef = useRef(new Set())
   const gameRef = useRef(null)
@@ -425,9 +640,9 @@ function TempleCanvas({ running, paused, onScore, onHud, onWin, onDoorEnter, res
     const coins = makeCoins(level)
     gameRef.current = {
       level,
-      player: { x: 52, y: 455, w: 30, h: 43, vx: 0, vy: 0, dir: 1, onGround: false, onLadder: null, coyote: 0, jumpLock: false, invuln: 0 },
+      player: { x: 52, y: 455, w: 30, h: 43, vx: 0, vy: 0, dir: 1, onGround: false, onLadder: null, coyote: 0, jumpLock: false, invuln: 0, grown: false, shield: 0, jumpStrength: -10.8 },
       mouse: { x: 480, y: 270, active: false, down: false },
-      enemies: makeEnemies(level), key: makeKey(level), coins, coinTotal: coins.length, coinsCollected: 0, bullets: [], sparks: [], muzzle: null, lastShot: 0, score: 0, hearts: 3, kills: 0, ammo: level === 1 ? 18 : level === 2 ? 28 : level === 3 ? 36 : 44, time: 0, doorTriggered: false,
+      enemies: makeEnemies(level), key: makeKey(level), fireballs: makeFireballs(level), ammoPickups: makeAmmoPickups(level), healthPickups: makeHealthPickups(level), bricks: makeBreakableBricks(level), powerups: [], enemyShots: [], coins, coinTotal: coins.length, coinsCollected: 0, bullets: [], sparks: [], muzzle: null, lastShot: 0, score: 0, hearts: MAX_HEARTS, kills: 0, ammo: getStartingAmmo(level), time: 0, doorTriggered: false, gameOver: false,
     }
   }, [level])
 
@@ -455,13 +670,13 @@ function TempleCanvas({ running, paused, onScore, onHud, onWin, onDoorEnter, res
       last = now
       const game = gameRef.current
       if (!game) { animation = requestAnimationFrame(render); return }
-      if (running && !paused) updateGame(game, keysRef.current, dt, now, onHud, onScore, onWin, onDoorEnter)
-      drawGame(ctx, game, now)
+      if (running && !paused) updateGame(game, keysRef.current, dt, now, onHud, onScore, onWin, onDoorEnter, onCoinCollected, onGameOver)
+      drawGame(ctx, game, now, dress)
       animation = requestAnimationFrame(render)
     }
     animation = requestAnimationFrame(render)
     return () => cancelAnimationFrame(animation)
-  }, [running, paused, onHud, onScore, onWin, onDoorEnter])
+  }, [running, paused, onHud, onScore, onWin, onDoorEnter, onCoinCollected, onGameOver, dress])
 
   const updatePointer = (event) => {
     const canvas = canvasRef.current
@@ -498,8 +713,16 @@ function TempleCanvas({ running, paused, onScore, onHud, onWin, onDoorEnter, res
   />
 }
 
-function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter) {
+function breakBrick(game, brick) {
+  if (brick.broken) return
+  brick.broken = true
+  game.powerups.push({ type: brick.reward, x: brick.x + brick.w / 2, y: brick.y - 22, collected: false })
+  game.sparks.push({ x: brick.x + brick.w / 2, y: brick.y + brick.h / 2, life: 18 })
+}
+
+function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter, onCoinCollected, onGameOver) {
   const p = game.player
+  const levelPlatforms = getPlatforms(game.level)
   game.time += dt
   const left = keys.has('a') || keys.has('arrowleft')
   const right = keys.has('d') || keys.has('arrowright')
@@ -553,17 +776,25 @@ function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter) {
     }
     p.jumpLock = jump
   } else {
-    if (jump && !p.jumpLock && (p.onGround || p.coyote > 0)) { p.vy = -10.8; p.onGround = false; p.coyote = 0 }
+    if (jump && !p.jumpLock && (p.onGround || p.coyote > 0)) { p.vy = p.jumpStrength; p.onGround = false; p.coyote = 0 }
     p.jumpLock = jump
     p.vy += 0.52 * dt
     p.x += p.vx * dt
     p.x = Math.max(4, Math.min(926, p.x))
+    const oldTop = p.y
     const oldBottom = p.y + p.h
     p.y += p.vy * dt
     p.onGround = false
-    for (const platform of platforms) {
+    for (const platform of levelPlatforms) {
       if (p.vy >= 0 && oldBottom <= platform.y + 4 && p.y + p.h >= platform.y && p.x + p.w > platform.x && p.x < platform.x + platform.w) {
         p.y = platform.y - p.h; p.vy = 0; p.onGround = true
+      }
+    }
+    for (const brick of game.bricks || []) {
+      if (!brick.broken && p.vy < 0 && oldTop >= brick.y + brick.h && p.y <= brick.y + brick.h && p.x + p.w > brick.x && p.x < brick.x + brick.w) {
+        breakBrick(game, brick)
+        p.y = brick.y + brick.h
+        p.vy = 0.8
       }
     }
     if (!p.onGround) p.coyote = Math.max(0, p.coyote - dt); else p.coyote = 5
@@ -583,8 +814,73 @@ function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter) {
     game.ammo -= 1; game.lastShot = now
     onHud({ ammo: game.ammo })
   }
-  if (!p.onLadder && p.y > 560) damagePlayer(game, onHud)
+  if (game.level === 6 && !p.onLadder && p.y + p.h > 515) {
+    damagePlayer(game, onHud, onGameOver)
+    if (!game.gameOver) {
+      p.x = 52
+      p.y = 500 - p.h
+      p.vy = 0
+      p.onGround = true
+    }
+  } else if (!p.onLadder && p.y > 560) damagePlayer(game, onHud, onGameOver)
   if (p.invuln > 0) p.invuln -= dt * 16.67
+  if (p.shield > 0) p.shield -= dt * 16.67
+
+  for (const fireball of game.fireballs) {
+    fireball.x -= fireball.speed * dt
+    fireball.angle -= (fireball.speed / fireball.radius) * dt
+    if (fireball.x < -fireball.radius * 2) fireball.x = CANVAS_WIDTH + 45 + fireball.id * 120
+    const fireballHitbox = { x: fireball.x - fireball.radius, y: fireball.y - fireball.radius, w: fireball.radius * 2, h: fireball.radius * 2 }
+    if (rectsOverlap(p, fireballHitbox)) {
+      game.sparks.push({ x: fireball.x, y: fireball.y, life: 10 })
+      damagePlayer(game, onHud, onGameOver)
+    }
+  }
+
+  for (const pickup of game.ammoPickups || []) {
+    const pickupHitbox = { x: pickup.x - 16, y: pickup.y - 13, w: 32, h: 26 }
+    if (!pickup.collected && rectsOverlap(p, pickupHitbox)) {
+      pickup.collected = true
+      game.ammo += pickup.amount
+      game.score += 25
+      game.sparks.push({ x: pickup.x, y: pickup.y, life: 18, coin: true })
+      onScore(game.score)
+      onHud({ ammo: game.ammo })
+    }
+  }
+
+  for (const pickup of game.healthPickups || []) {
+    const pickupHitbox = { x: pickup.x - 16, y: pickup.y - 13, w: 32, h: 26 }
+    if (!pickup.collected && game.hearts < MAX_HEARTS && rectsOverlap(p, pickupHitbox)) {
+      pickup.collected = true
+      game.hearts += 1
+      game.score += 25
+      game.sparks.push({ x: pickup.x, y: pickup.y, life: 18, coin: true })
+      onScore(game.score)
+      onHud({ hearts: game.hearts })
+    }
+  }
+
+  for (const powerup of game.powerups || []) {
+    const powerupHitbox = { x: powerup.x - 14, y: powerup.y - 14, w: 28, h: 28 }
+    if (!powerup.collected && rectsOverlap(p, powerupHitbox)) {
+      powerup.collected = true
+      if (powerup.type === 'growth') {
+        if (!p.grown) {
+          p.grown = true
+          p.w = 34
+          p.h = 50
+          p.y -= 7
+          p.jumpStrength = -12.2
+        }
+      } else {
+        p.shield = 8000
+      }
+      game.score += 50
+      game.sparks.push({ x: powerup.x, y: powerup.y, life: 22, coin: true })
+      onScore(game.score)
+    }
+  }
 
   for (const coin of game.coins) {
     const coinHitbox = { x: coin.x - 10, y: coin.y - 10, w: 20, h: 20 }
@@ -595,6 +891,7 @@ function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter) {
       game.sparks.push({ x: coin.x, y: coin.y, life: 18, coin: true })
       onScore(game.score)
       onHud({ coins: game.coinsCollected })
+      onCoinCollected()
     }
   }
 
@@ -604,20 +901,44 @@ function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter) {
     game.muzzle.life -= dt
     if (game.muzzle.life <= 0) game.muzzle = null
   }
+  for (const brick of game.bricks || []) {
+    if (brick.broken) continue
+    for (const bullet of game.bullets) {
+      if (bullet.x > brick.x && bullet.x < brick.x + brick.w && bullet.y > brick.y && bullet.y < brick.y + brick.h) {
+        bullet.life = 0
+        breakBrick(game, brick)
+        break
+      }
+    }
+  }
   for (const enemy of game.enemies) {
     if (!enemy.alive) continue
+    if (enemy.attackFlash > 0) enemy.attackFlash -= dt
+    if (game.level >= 6 && enemy.type === 'guardian') {
+      enemy.shotTimer -= dt * 16.67
+      const targetDistance = p.x - enemy.x
+      if (enemy.shotTimer <= 0 && Math.abs(targetDistance) < 420 && Math.abs(p.y - enemy.y) < 230) {
+        const startX = enemy.x + enemy.w / 2
+        const startY = enemy.y + 18
+        const angle = Math.atan2((p.y + p.h / 2) - startY, (p.x + p.w / 2) - startX)
+        const shotSpeed = 3.4 + Math.min(1.1, (game.level - 6) * 0.06)
+        game.enemyShots.push({ x: startX, y: startY, vx: Math.cos(angle) * shotSpeed, vy: Math.sin(angle) * shotSpeed, life: 180, angle })
+        enemy.shotTimer = Math.max(850, 1800 - (game.level - 6) * 35)
+        enemy.attackFlash = 9
+      }
+    }
     const distance = p.x - enemy.x
     if (Math.abs(distance) < 230 && Math.abs(p.y - enemy.y) < 90) enemy.dir = distance > 0 ? 1 : -1
     enemy.vy += 0.52 * dt
-    enemy.x += (Math.abs(distance) < 230 ? enemy.dir * 0.7 : 0) * dt
+    enemy.x += (Math.abs(distance) < 230 ? enemy.dir * (enemy.speed || 0.7) : 0) * dt
     enemy.x = Math.max(4, Math.min(930, enemy.x))
     const oldEnemyBottom = enemy.y + enemy.h
     enemy.y += enemy.vy * dt
-    for (const platform of platforms) {
+    for (const platform of levelPlatforms) {
       if (enemy.vy >= 0 && oldEnemyBottom <= platform.y + 4 && enemy.y + enemy.h >= platform.y && enemy.x + enemy.w > platform.x && enemy.x < platform.x + platform.w) { enemy.y = platform.y - enemy.h; enemy.vy = 0 }
     }
     if (enemy.y > 560) enemy.alive = false
-    if (rectsOverlap(p, enemy) && p.invuln <= 0) damagePlayer(game, onHud)
+    if (rectsOverlap(p, enemy) && p.invuln <= 0) damagePlayer(game, onHud, onGameOver)
     for (const bullet of game.bullets) {
       if (bullet.x > enemy.x - 5 && bullet.x < enemy.x + enemy.w + 5 && bullet.y > enemy.y && bullet.y < enemy.y + enemy.h) {
         bullet.life = 0; enemy.hp -= 1
@@ -630,6 +951,18 @@ function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter) {
     }
   }
 
+  for (const shot of game.enemyShots || []) {
+    shot.x += shot.vx * dt
+    shot.y += shot.vy * dt
+    shot.life -= dt
+    if (rectsOverlap(p, { x: shot.x - 7, y: shot.y - 7, w: 14, h: 14 })) {
+      shot.life = 0
+      game.sparks.push({ x: shot.x, y: shot.y, life: 12 })
+      damagePlayer(game, onHud, onGameOver)
+    }
+  }
+  game.enemyShots = (game.enemyShots || []).filter((shot) => shot.life > 0 && shot.x > -30 && shot.x < CANVAS_WIDTH + 30 && shot.y > 70 && shot.y < CANVAS_HEIGHT + 30)
+
   const chamberCleared = game.enemies.every((enemy) => !enemy.alive)
   if (chamberCleared && !game.key.collected) {
     const keyHitbox = { x: game.key.x - 13, y: game.key.y - 13, w: 26, h: 26 }
@@ -638,7 +971,7 @@ function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter) {
       game.score += 100
       game.sparks.push({ x: game.key.x, y: game.key.y, life: 22, coin: true })
       onScore(game.score)
-      onWin()
+      onWin(game.level)
     }
   }
   if (chamberCleared && game.key.collected && !game.doorTriggered) {
@@ -646,24 +979,52 @@ function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter) {
     const enteringDoor = keys.has('arrowup') || keys.has('w') || keys.has('enter') || (game.mouse.down && game.mouse.x > 820 && game.mouse.y > 300)
     if (nearDoor && enteringDoor) {
       game.doorTriggered = true
-      onDoorEnter()
+      onDoorEnter(game.level)
     }
   }
   game.sparks = game.sparks.filter(s => (s.life -= dt) > 0)
 }
 
-function damagePlayer(game, onHud) {
-  if (game.player.invuln > 0) return
-  game.hearts -= 1; game.player.invuln = 130; game.player.vy = -7; game.player.x -= game.player.dir * 30
+function damagePlayer(game, onHud, onGameOver) {
+  const p = game.player
+  if (p.invuln > 0 || game.gameOver) return
+  p.invuln = 130
+  p.vy = -7
+  p.x -= p.dir * 30
+  if (p.shield > 0) {
+    p.shield = 0
+    game.sparks.push({ x: p.x + 15, y: p.y + 20, life: 16 })
+    return
+  }
+  if (p.grown) {
+    p.grown = false
+    p.w = 30
+    p.h = 43
+    p.y += 7
+    p.jumpStrength = -10.8
+    game.sparks.push({ x: p.x + 15, y: p.y + 20, life: 16 })
+    return
+  }
+  game.hearts -= 1
   onHud({ hearts: game.hearts })
-  if (game.hearts <= 0) { game.hearts = 3; game.player.x = 52; game.player.y = 450; game.player.onLadder = null; game.player.onGround = false; game.kills = 0; game.key = makeKey(game.level); game.enemies = makeEnemies(game.level); onHud({ hearts: 3, kills: 0 }) }
+  if (game.hearts <= 0) {
+    game.gameOver = true
+    onGameOver()
+  }
 }
 
-function drawGame(ctx, game, now) {
+function drawGame(ctx, game, now, dress) {
   drawBackground(ctx, now)
   drawTempleDetails(ctx)
+  if (game.level === 6) drawVolcanicFloor(ctx, now)
+  const levelPlatforms = getPlatforms(game.level)
   for (const ladder of ladders) drawLadder(ctx, ladder)
-  for (const platform of platforms) drawPlatform(ctx, platform)
+  for (const platform of levelPlatforms) drawPlatform(ctx, platform)
+  for (const fireball of game.fireballs) drawFireball(ctx, fireball, now)
+  for (const brick of game.bricks || []) drawBreakableBrick(ctx, brick, now)
+  for (const powerup of game.powerups || []) drawPowerup(ctx, powerup, now)
+  for (const pickup of game.ammoPickups || []) drawAmmoPickup(ctx, pickup, now)
+  for (const pickup of game.healthPickups || []) drawHealthPickup(ctx, pickup, now)
   for (const coin of game.coins) drawCoin(ctx, coin, now)
   const chamberCleared = game.enemies.every((enemy) => !enemy.alive)
   drawKey(ctx, game.key, now, chamberCleared)
@@ -683,8 +1044,19 @@ function drawGame(ctx, game, now) {
     ctx.fillStyle = '#fff4b6'; ctx.fillRect(7, -1, 4, 2)
     ctx.restore()
   }
+  for (const shot of game.enemyShots || []) {
+    ctx.save()
+    ctx.translate(shot.x, shot.y)
+    ctx.rotate(shot.angle || 0)
+    ctx.globalAlpha = 0.3
+    ctx.fillStyle = '#e56c61'; ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2); ctx.fill()
+    ctx.globalAlpha = 1
+    ctx.fillStyle = '#d94e58'; ctx.fillRect(-6, -5, 12, 10)
+    ctx.fillStyle = '#ffe08a'; ctx.fillRect(-3, -3, 6, 6)
+    ctx.restore()
+  }
   for (const enemy of game.enemies) drawEnemy(ctx, enemy, now)
-  drawPlayer(ctx, game.player, now, game.mouse.active ? game.mouse : null)
+  drawPlayer(ctx, game.player, now, game.mouse.active ? game.mouse : null, dress)
   if (game.muzzle) {
     ctx.save()
     ctx.translate(game.muzzle.x, game.muzzle.y)
@@ -731,12 +1103,12 @@ function LandingPage({ onStart }) {
           <div className="landing-art-label"><span>01</span><b>THE DESCENT<br />BEGINS</b><small>MOVE · AIM · SURVIVE</small></div>
         </div>
       </section>
-      <footer className="landing-footer"><span>© 2024 TEMPLE OF BOOM</span><span>FOUR CHAMBERS <i>✦</i> ONE WAY OUT</span></footer>
+      <footer className="landing-footer"><span>© 2024 TEMPLE OF BOOM</span><span>25 CHAMBERS <i>✦</i> ONE WAY OUT</span></footer>
     </main>
   )
 }
 
-function HomeScreen({ onStart, onLevels, onShop, onHelp }) {
+function HomeScreen({ onStart, onLevels, onShop, onHelp, unlockedLevel }) {
   return (
     <div className="game-overlay home-overlay">
       <div className="home-content">
@@ -744,7 +1116,7 @@ function HomeScreen({ onStart, onLevels, onShop, onHelp }) {
         <h2>TEMPLE<br /><strong>OF BOOM</strong></h2>
         <p>Descend into the ruins. Defeat the guardians.<br />Find the door before the temple finds you.</p>
         <div className="home-actions home-menu-actions">
-          <button className="primary-cta" onClick={onStart}>START GAME <span>→</span></button>
+          <button className="primary-cta" onClick={onStart}>{unlockedLevel > 1 ? `CONTINUE LEVEL ${String(unlockedLevel).padStart(2, '0')}` : 'START GAME'} <span>→</span></button>
           <button className="home-secondary" onClick={onLevels}>LEVELS <span>↗</span></button>
           <button className="home-secondary" onClick={onShop}>SHOP <span>↗</span></button>
           <button className="home-secondary home-help-button" onClick={onHelp}>HELP <span>?</span></button>
@@ -767,6 +1139,9 @@ function HelpScreen({ onBack }) {
           <div className="help-row"><b>JUMP / CLIMB</b><span><kbd>W</kbd><kbd>↑</kbd> or <kbd>SPACE</kbd></span></div>
           <div className="help-row"><b>AIM</b><span>Move the mouse</span></div>
           <div className="help-row"><b>FIRE</b><span><kbd>CLICK</kbd> or hold <kbd>X</kbd></span></div>
+          <div className="help-row"><b>BREAK BRICKS</b><span>Jump into or shoot them</span></div>
+          <div className="help-row"><b>POWERUPS</b><span>Collect growth and shield potions</span></div>
+          <div className="help-row"><b>GUARDIAN SHOTS</b><span>Dodge them from chamber 06 onward</span></div>
           <div className="help-row"><b>PAUSE</b><span>Press <kbd>P</kbd></span></div>
         </div>
         <button className="primary-cta" onClick={onBack}>GOT IT <span>→</span></button>
@@ -775,43 +1150,86 @@ function HelpScreen({ onBack }) {
   )
 }
 
-function ShopScreen({ onBack }) {
+function ShopScreen({ onBack, coinWallet, dress }) {
+  const outfitUnlocked = coinWallet >= OUTFIT_COST
   return (
     <div className="game-overlay shop-overlay">
       <div className="shop-panel">
         <div className="overlay-kicker">TEMPLE MARKET // LOADOUT</div>
         <h2>THE <strong>SHOP</strong></h2>
-        <p className="shop-intro">Prepare for the descent. More relics will unlock as you clear the temple.</p>
+        <p className="shop-intro">Collect {OUTFIT_COST} coins to unlock the Golden Raider dress. The outfit equips automatically when you reach the goal.</p>
+        <div className="shop-wallet"><span>COIN WALLET</span><strong>{coinWallet}/{OUTFIT_COST}</strong></div>
         <div className="shop-grid">
           <div className="shop-item"><span className="shop-item-icon">✦</span><div><b>GOLDEN CHARM</b><small>STARTING RELIC</small></div><em>OWNED</em></div>
+          <div className={`shop-item ${outfitUnlocked ? '' : 'shop-item-locked'}`}><span className="shop-item-icon">♛</span><div><b>GOLDEN RAIDER DRESS</b><small>NEW OUTFIT // 100 COINS</small></div><em>{dress === 'golden' ? 'EQUIPPED' : `${coinWallet}/${OUTFIT_COST}`}</em></div>
           <div className="shop-item shop-item-locked"><span className="shop-item-icon">◆</span><div><b>HUNTER'S MARK</b><small>INCREASED DAMAGE</small></div><em>LOCKED</em></div>
           <div className="shop-item shop-item-locked"><span className="shop-item-icon">◈</span><div><b>RELIC OF LIFE</b><small>EXTRA HEART</small></div><em>LOCKED</em></div>
         </div>
         <button className="primary-cta" onClick={onBack}>BACK TO HOME <span>←</span></button>
-        <div className="map-hint">CLEAR CHAMBERS TO UNLOCK NEW ITEMS</div>
+        <div className="map-hint">COLLECT COINS IN THE CHAMBERS TO UPGRADE YOUR OUTFIT</div>
       </div>
     </div>
   )
 }
 
-function LevelMap({ onStart, onBack, unlockedLevel }) {
+function LevelMap({ onStart, onBack, unlockedLevel, levelStars }) {
+  const [selectedLevel, setSelectedLevel] = useState(1)
+  const unlockedLimit = Math.min(unlockedLevel, MAX_LEVEL)
+
+  useEffect(() => {
+    setSelectedLevel((current) => Math.min(current, MAX_LEVEL))
+  }, [unlockedLevel])
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'ArrowLeft') setSelectedLevel((current) => Math.max(1, current - 1))
+      if (event.key === 'ArrowRight') setSelectedLevel((current) => Math.min(MAX_LEVEL, current + 1))
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  const changeChamber = (direction) => {
+    setSelectedLevel((current) => Math.max(1, Math.min(MAX_LEVEL, current + direction)))
+  }
+  const selectedNumber = String(selectedLevel).padStart(2, '0')
+  const isFinalChamber = selectedLevel === MAX_LEVEL
+  const isUnlocked = selectedLevel <= unlockedLimit
+  const performanceStars = levelStars[selectedLevel] || 0
+  const isCleared = Boolean(performanceStars) || selectedLevel < unlockedLevel
+
   return (
     <div className="game-overlay map-overlay">
-      <div className="map-panel">
+      <div className="map-panel map-carousel-panel">
         <button className="map-exit" onClick={onBack}>← BACK</button>
-        <div className="overlay-kicker">MISSION SELECT // CHAMBER ROUTE</div>
-        <h2>THE TEMPLE <strong>MAP</strong></h2>
-        <p className="map-intro">Clear each chamber to unlock the next.<br />Your first descent starts here.</p>
-        <div className="map-route" aria-label="Temple level map">
-          <div className="route-line" />
-          <div className="map-node selected" onClick={() => onStart(1)}><span>01</span><small>GATE</small></div>
-          <div className={`map-node ${unlockedLevel >= 2 ? 'unlocked' : 'locked'}`} onClick={() => unlockedLevel >= 2 && onStart(2)}><span>02</span><small>VAULT</small>{unlockedLevel < 2 && <i>×</i>}</div>
-          <div className={`map-node ${unlockedLevel >= 3 ? 'unlocked' : 'locked'}`} onClick={() => unlockedLevel >= 3 && onStart(3)}><span>03</span><small>RUINS</small>{unlockedLevel < 3 && <i>×</i>}</div>
-          <div className={`map-node ${unlockedLevel >= 4 ? 'unlocked' : 'locked'}`} onClick={() => unlockedLevel >= 4 && onStart(4)}><span>04</span><small>TOMB</small>{unlockedLevel < 4 && <i>×</i>}</div>
+        <h2>LEVEL <strong>MAP</strong></h2>
+        <div className="map-carousel" aria-label="Temple level map">
+          <button
+            className="map-arrow map-arrow-prev"
+            onClick={() => changeChamber(-1)}
+            disabled={selectedLevel === 1}
+            aria-label="Previous chamber"
+          >‹</button>
+          <article className={`map-slide-card ${isFinalChamber ? 'map-slide-final' : ''} ${isUnlocked ? '' : 'map-slide-locked'}`} aria-live="polite">
+            <div className="map-slide-content">
+              <div className="map-slide-heading"><span>CHAMBER {selectedNumber}</span><em>{isCleared ? 'CLEARED' : isUnlocked ? 'UNLOCKED' : 'LOCKED'}</em></div>
+              <div className="map-slide-number">{selectedNumber}</div>
+              <div className="map-slide-title">{getLevelName(selectedLevel)}</div>
+              <div className="map-performance" aria-label={`Performance: ${performanceStars} out of 3 stars`}>
+                <span>PERFORMANCE</span>
+                <div className="map-stars" aria-hidden="true">{Array.from({ length: 3 }, (_, index) => <b className={index < performanceStars ? 'earned' : 'empty'} key={index}>★</b>)}</div>
+              </div>
+              <button className="primary-cta" onClick={() => isUnlocked && onStart(selectedLevel)} disabled={!isUnlocked}>{isUnlocked ? 'ENTER CHAMBER' : 'CHAMBER LOCKED'} <span>{isUnlocked ? '→' : '×'}</span></button>
+            </div>
+          </article>
+          <button
+            className="map-arrow map-arrow-next"
+            onClick={() => changeChamber(1)}
+            disabled={selectedLevel === MAX_LEVEL}
+            aria-label="Next chamber"
+          >›</button>
         </div>
-        <div className="map-selection"><span className="map-selection-number">01</span><div><b>TEMPLE GATE</b><small>2 GUARDIANS // EASY</small></div><em>UNLOCKED</em></div>
-        <button className="primary-cta" onClick={onStart}>ENTER LEVEL 01 <span>→</span></button>
-        <div className="map-hint">MOVE WITH ARROWS <b>•</b> AIM WITH MOUSE <b>•</b> CLICK TO FIRE</div>
+        <div className="map-carousel-footer"><span>CHAMBER {selectedNumber} / {String(MAX_LEVEL).padStart(2, '0')}</span><span className="map-slide-dots" aria-hidden="true">{Array.from({ length: MAX_LEVEL }, (_, index) => <i className={index + 1 === selectedLevel ? 'active' : ''} key={index} />)}</span></div>
       </div>
     </div>
   )
@@ -825,16 +1243,52 @@ function App() {
   const [showShop, setShowShop] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const [level, setLevel] = useState(1)
-  const [unlockedLevel, setUnlockedLevel] = useState(1)
+  const [unlockedLevel, setUnlockedLevel] = useState(() => {
+    const savedLevel = Number(window.localStorage.getItem('temple-unlocked-level') || 1)
+    return Number.isInteger(savedLevel) ? Math.min(MAX_LEVEL, Math.max(1, savedLevel)) : 1
+  })
   const [paused, setPaused] = useState(false)
   const [muted, setMuted] = useState(false)
   const [resetKey, setResetKey] = useState(0)
   const [hud, setHud] = useState(initialHud)
   const [doorOpen, setDoorOpen] = useState(false)
   const [won, setWon] = useState(false)
+  const [gameOver, setGameOver] = useState(false)
+  const levelAttemptsRef = useRef({})
+  const [levelStars, setLevelStars] = useState(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem('temple-level-stars') || '{}') || {}
+    } catch {
+      return {}
+    }
+  })
+  const [coinWallet, setCoinWallet] = useState(() => Number(window.localStorage.getItem('temple-coin-wallet') || 0))
+  const [dress, setDress] = useState(() => window.localStorage.getItem('temple-player-dress') || 'explorer')
 
   const handleHud = useCallback((change) => setHud((current) => ({ ...current, ...change })), [])
   const handleScore = useCallback((score) => setHud((current) => ({ ...current, score })), [])
+  const handleCoinCollected = useCallback(() => {
+    setCoinWallet((current) => Math.min(OUTFIT_COST, current + 1))
+  }, [])
+  const handleGameOver = useCallback(() => {
+    setWon(false)
+    setGameOver(true)
+    setRunning(false)
+  }, [])
+
+  useEffect(() => {
+    if (coinWallet >= OUTFIT_COST && dress !== 'golden') setDress('golden')
+  }, [coinWallet, dress])
+
+  useEffect(() => {
+    window.localStorage.setItem('temple-coin-wallet', String(coinWallet))
+    window.localStorage.setItem('temple-player-dress', dress)
+  }, [coinWallet, dress])
+
+  useEffect(() => {
+    window.localStorage.setItem('temple-unlocked-level', String(unlockedLevel))
+    window.localStorage.setItem('temple-level-stars', JSON.stringify(levelStars))
+  }, [unlockedLevel, levelStars])
 
   useEffect(() => {
     const togglePause = (event) => {
@@ -847,18 +1301,26 @@ function App() {
     return () => window.removeEventListener('keydown', togglePause)
   }, [running])
 
+  const recordLevelPerformance = useCallback((completedLevel) => {
+    // First attempt = 3 stars, second = 2, and three or more = 1 star.
+    const attempts = levelAttemptsRef.current[completedLevel] || 1
+    const stars = attempts === 1 ? 3 : attempts === 2 ? 2 : 1
+    setLevelStars((current) => ({ ...current, [completedLevel]: Math.max(current[completedLevel] || 0, stars) }))
+  }, [])
+
   const startLevel = (nextLevel = 1) => {
+    levelAttemptsRef.current[nextLevel] = (levelAttemptsRef.current[nextLevel] || 0) + 1
     setLevel(nextLevel)
-    setHud({ ...initialHud, level: nextLevel, total: makeEnemies(nextLevel).length, ammo: nextLevel === 1 ? 18 : nextLevel === 2 ? 28 : nextLevel === 3 ? 36 : 44, coinTotal: makeCoins(nextLevel).length })
-    setWon(false); setDoorOpen(false); setPaused(false); setShowHome(false); setShowMap(false); setShowShop(false); setShowHelp(false); setRunning(true)
+    setHud({ ...initialHud, level: nextLevel, total: makeEnemies(nextLevel).length, ammo: getStartingAmmo(nextLevel), coinTotal: makeCoins(nextLevel).length })
+    setWon(false); setGameOver(false); setDoorOpen(false); setPaused(false); setShowHome(false); setShowMap(false); setShowShop(false); setShowHelp(false); setRunning(true)
     setResetKey((key) => key + 1)
   }
-  const start = () => startLevel(1)
+  const start = (requestedLevel = unlockedLevel) => startLevel(requestedLevel)
   const restart = () => startLevel(level)
-  const openMap = () => { setPaused(false); setRunning(false); setShowHome(false); setShowMap(true); setShowShop(false); setShowHelp(false) }
-  const openShop = () => { setPaused(false); setRunning(false); setShowHome(false); setShowMap(false); setShowShop(true); setShowHelp(false) }
-  const openHelp = () => { setPaused(false); setRunning(false); setShowHome(false); setShowMap(false); setShowShop(false); setShowHelp(true) }
-  const openHome = (event) => { event?.preventDefault(); setPaused(false); setRunning(false); setShowMap(false); setShowShop(false); setShowHelp(false); setShowHome(true) }
+  const openMap = () => { setGameOver(false); setPaused(false); setRunning(false); setShowHome(false); setShowMap(true); setShowShop(false); setShowHelp(false) }
+  const openShop = () => { setGameOver(false); setPaused(false); setRunning(false); setShowHome(false); setShowMap(false); setShowShop(true); setShowHelp(false) }
+  const openHelp = () => { setGameOver(false); setPaused(false); setRunning(false); setShowHome(false); setShowMap(false); setShowShop(false); setShowHelp(true) }
+  const openHome = (event) => { event?.preventDefault(); setGameOver(false); setPaused(false); setRunning(false); setShowMap(false); setShowShop(false); setShowHelp(false); setShowHome(true) }
 
   if (showLanding) return <div className="app-shell"><LandingPage onStart={() => setShowLanding(false)} /></div>
 
@@ -884,12 +1346,13 @@ function App() {
 
         <section className="game-frame">
           <div className="canvas-wrap">
-            <TempleCanvas running={running} paused={paused} level={level} onScore={handleScore} onHud={handleHud} onWin={() => { setDoorOpen(true); if (level < MAX_LEVEL) setUnlockedLevel((current) => Math.max(current, level + 1)) }} onDoorEnter={() => { if (level < MAX_LEVEL) startLevel(level + 1); else { setWon(true); setRunning(false) } }} resetKey={resetKey} />
-            {showHome && <HomeScreen onStart={start} onLevels={openMap} onShop={openShop} onHelp={openHelp} />}
-            {!showHome && showMap && <LevelMap onStart={start} onBack={openHome} unlockedLevel={unlockedLevel} />}
-            {!showHome && showShop && <ShopScreen onBack={openHome} />}
+            <TempleCanvas running={running} paused={paused} level={level} dress={dress} onScore={handleScore} onHud={handleHud} onCoinCollected={handleCoinCollected} onGameOver={handleGameOver} onWin={(completedLevel) => { setDoorOpen(true); if (completedLevel < MAX_LEVEL) setUnlockedLevel((current) => Math.max(current, completedLevel + 1)) }} onDoorEnter={(completedLevel) => { recordLevelPerformance(completedLevel); if (completedLevel < MAX_LEVEL) startLevel(completedLevel + 1); else { setWon(true); setRunning(false) } }} resetKey={resetKey} />
+            {showHome && <HomeScreen onStart={start} onLevels={openMap} onShop={openShop} onHelp={openHelp} unlockedLevel={unlockedLevel} />}
+            {!showHome && showMap && <LevelMap onStart={start} onBack={openHome} unlockedLevel={unlockedLevel} levelStars={levelStars} />}
+            {!showHome && showShop && <ShopScreen onBack={openHome} coinWallet={coinWallet} dress={dress} />}
             {!showHome && showHelp && <HelpScreen onBack={openHome} />}
-            {!showHome && !showMap && !showShop && !showHelp && !running && <div className="game-overlay intro-overlay">
+            {gameOver && <div className="game-overlay game-over-overlay"><div className="pause-card"><div className="overlay-kicker">RUN ENDED // SECTOR {String(level).padStart(2, '0')}</div><h2>TEMPLE <strong>LOST</strong></h2><p>The guardians overwhelmed you.<br />Regroup and try the chamber again.</p><button className="primary-cta" onClick={restart}>RESTART CHAMBER <span>↻</span></button><button className="text-button" onClick={openHome}>RETURN HOME</button></div></div>}
+            {!showHome && !showMap && !showShop && !showHelp && !running && !gameOver && <div className="game-overlay intro-overlay">
               <div className="overlay-kicker">A PIXEL PLATFORMER BY POKI</div>
               <h2>ENTER THE<br /><strong>TEMPLE</strong></h2>
               <p>Fight your way through the ruins.<br />Leave no guardian standing.</p>
@@ -898,7 +1361,7 @@ function App() {
             </div>}
             {running && paused && !won && <div className="game-overlay pause-overlay"><div className="pause-card"><div className="overlay-kicker">MISSION ON HOLD</div><h2>PAUSED</h2><button className="primary-cta" onClick={() => setPaused(false)}>RESUME <span>→</span></button><button className="text-button" onClick={restart}>RESTART RUN</button></div></div>}
             {doorOpen && !won && <div className="door-objective"><span className="door-icon">↗</span><div><b>CHAMBER CLEAR — DOOR OPEN</b><small>MOVE TO THE DOOR ON THE RIGHT · PRESS ↑ TO ENTER</small></div></div>}
-            {won && <div className="game-overlay win-overlay"><div className="pause-card"><div className="overlay-kicker">RUN COMPLETE // LEVEL 04</div><h2>BOOM!</h2><p>Every chamber cleared.<br />The temple is yours.</p><button className="primary-cta" onClick={start}>PLAY AGAIN <span>→</span></button><button className="text-button" onClick={openMap}>VIEW LEVEL MAP</button></div></div>}
+            {won && <div className="game-overlay win-overlay"><div className="pause-card"><div className="overlay-kicker">RUN COMPLETE // LEVEL {String(MAX_LEVEL).padStart(2, '0')}</div><h2>BOOM!</h2><p>Every chamber cleared.<br />The temple is yours.</p><button className="primary-cta" onClick={start}>PLAY AGAIN <span>→</span></button><button className="text-button" onClick={openMap}>VIEW LEVEL MAP</button></div></div>}
             {running && !paused && !won && <button className="pause-button" onClick={() => setPaused(true)} aria-label="Pause">Ⅱ</button>}
           </div>
           {running && <div className="game-footer"><span><i className="status-dot" /> RUN IN PROGRESS</span><span>MOUSE AIM <b>•</b> CLICK FIRE <b>•</b> ARROWS MOVE <b>•</b> W / ↑ CLIMB</span><span>COINS <strong>{String(hud.coins || 0).padStart(2, '0')}/{String(hud.coinTotal || 0).padStart(2, '0')}</strong> <b>•</b> SCORE <strong>{String(hud.score).padStart(5, '0')}</strong></span></div>}

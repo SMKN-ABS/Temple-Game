@@ -11,14 +11,18 @@ This repository contains a small React/Vite playable prototype with a custom Can
 - Mouse aiming and hold-to-fire shooting
 - Keyboard movement and shooting controls
 - Enemy guardians with different visual types: crabs, tortoises, and guardians
-- Health, ammunition, score, coin collection, and guardian progress HUD
-- Animated gold coins placed throughout each chamber; collecting one awards 50 points
+- Health, collectible heart and ammo pickups, score, coin collection, and guardian progress HUD
+- Breakable bricks that release growth and shield power-ups
+- Guardian projectiles introduced from Chamber 6 onward with visible attack telegraphs
+- Volcanic lava crossing in Chamber 6 with rising and falling bridge steps
+- Animated gold coins placed throughout each chamber; collecting one awards 50 points and adds to the persistent coin wallet
+- Golden Raider player dress automatically unlocks and equips after collecting 100 coins
 - Home screen, level map, pause screen, and victory screen
-- Four playable chambers in the current prototype:
-  - **Temple Gate** — the opening chamber with two guardians
-  - **Lava Vault** — unlocked after clearing Temple Gate, with a larger guardian roster
-  - **Sunken Ruins** — a deeper chamber with additional guardians and collectibles
-  - **Final Tomb** — the final chamber with the largest guardian roster
+- Twenty-five playable chambers in the current prototype:
+  - **Temple Gate** — Chamber 1
+  - **Lava Vault** — Chamber 2
+  - Chambers 3–25 use numbered chamber labels without separate title names
+  - Chamber 6 introduces lava, volcano scenery, and raised stepping-stone bridges
 - Responsive layout around a fixed 960 × 540 game canvas
 
 ## How to play
@@ -28,7 +32,7 @@ This repository contains a small React/Vite playable prototype with a custom Can
 3. Aim with the mouse and click or hold the left mouse button to fire.
 4. Defeat every guardian in the chamber.
 5. When the door opens, move to the door on the right and press **Up**, **W**, or **Enter** to continue.
-6. Clear the Final Tomb to win the run.
+6. Clear all 25 chambers to win the run.
 
 ### Controls
 
@@ -100,10 +104,12 @@ The game currently uses no external art, audio, or game engine. Visuals are gene
 
 This is an early playable prototype. Some interface and gameplay elements are intentionally incomplete:
 
-- Coins are collected per run and are not yet persisted as a long-term completion record.
+- Coin progress and the highest unlocked chamber are saved in the browser; `START GAME` resumes at the highest unlocked level.
 - The mute button is present, but audio has not yet been added.
-- Ammunition is limited and does not currently replenish through pickups or reloading.
-- Losing all health resets the chamber instead of showing a dedicated game-over screen.
+- Ammunition is limited, but collectible ammo crates restore bullets when picked up; heart pickups restore lost health.
+- Growth power-ups increase jump height and absorb one enemy hit; shield potions block one attack.
+- From Chamber 6 onward, guardian enemies fire telegraphed projectiles that must be dodged or blocked.
+- Losing all health now shows a dedicated `Temple Lost` screen with restart and home options.
 - Levels 2–4 currently reuse the temple layout and visual treatment instead of having fully distinct environments.
 - The footer's “High Score” value currently reflects the active run score rather than a saved best score.
 
