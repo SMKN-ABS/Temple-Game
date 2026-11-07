@@ -10,14 +10,22 @@ const OUTFIT_COST = 100
 const levelNames = {
   1: 'TEMPLE GATE',
   2: 'LAVA VAULT',
+  6: 'VOLCANIC FOUNDRY',
+  7: 'EMERALD WILDS',
 }
 
 function getLevelName(level = 1) {
   return levelNames[level] || `CHAMBER ${String(level).padStart(2, '0')}`
 }
 
+function getSafeLevel(level = 1) {
+  const numericLevel = Number(level)
+  return Number.isFinite(numericLevel) ? Math.max(1, Math.floor(numericLevel)) : 1
+}
+
 function getStartingAmmo(level = 1) {
-  return 18 + (level - 1) * 8
+  const chamber = getSafeLevel(level)
+  return 18 + (chamber - 1) * 8
 }
 
 const initialHud = {
@@ -80,11 +88,12 @@ function makeAmmoPickups(level = 1) {
     { x: 790, y: 397 },
     { x: 325, y: 277 },
   ]
-  const count = level === 1 ? 1 : level < 4 ? 2 : 3
+  const chamber = getSafeLevel(level)
+  const count = chamber === 1 ? 1 : chamber < 4 ? 2 : 3
   return pickups.slice(0, count).map((pickup, index) => ({
     ...pickup,
     id: index,
-    amount: 8 + Math.floor(level / 5),
+    amount: 8 + Math.floor(chamber / 5),
     collected: false,
   }))
 }
@@ -168,11 +177,34 @@ function getPlatforms(level = 1) {
   ]
 }
 
+function placeEnemiesOnPlatforms(enemies, level) {
+  const levelPlatforms = getPlatforms(level)
+  return enemies.map((enemy) => {
+    const enemyCenter = enemy.x + enemy.w / 2
+    const support = levelPlatforms
+      .filter((platform) => platform.y >= enemy.y + enemy.h && enemyCenter >= platform.x && enemyCenter <= platform.x + platform.w)
+      .sort((first, second) => first.y - second.y)[0]
+    if (!support) return enemy
+
+    // Keep the whole enemy and its sprite details on the platform, not just the hitbox.
+    const patrolMin = support.x + 12
+    const patrolMax = support.x + support.w - enemy.w - 12
+    return {
+      ...enemy,
+      x: Math.max(patrolMin, Math.min(patrolMax, enemy.x)),
+      y: support.y - enemy.h,
+      patrolMin,
+      patrolMax: Math.max(patrolMin, patrolMax),
+    }
+  })
+}
+
 const ladders = [
   { x: 225, y: 300, h: 120 },
-  { x: 520, y: 265, h: 120 },
+  // Keep both rails inside the lower and upper platform edges.
+  { x: 490, y: 265, h: 120 },
   { x: 760, y: 205, h: 105 },
-  { x: 350, y: 185, h: 115 },
+  { x: 330, y: 185, h: 115 },
   { x: 445, y: 100, h: 85 },
 ]
 
@@ -190,28 +222,28 @@ function drawText(ctx, text, x, y, size, color, align = 'left') {
   ctx.restore()
 }
 
-function drawVolcanicFloor(ctx, time) {
-  const lavaGradient = ctx.createLinearGradient(0, 475, 0, CANVAS_HEIGHT)
+function drawVolcanicFloor(ctx, time, lavaTop = 505) {
+  const lavaGradient = ctx.createLinearGradient(0, lavaTop, 0, CANVAS_HEIGHT)
   lavaGradient.addColorStop(0, '#e15d32')
   lavaGradient.addColorStop(0.35, '#9d302d')
   lavaGradient.addColorStop(1, '#351a2b')
   ctx.fillStyle = lavaGradient
-  ctx.fillRect(0, 475, CANVAS_WIDTH, 65)
+  ctx.fillRect(0, lavaTop, CANVAS_WIDTH, CANVAS_HEIGHT - lavaTop)
   ctx.fillStyle = '#ffb43f'
   ctx.globalAlpha = 0.75
   for (let x = -20; x < CANVAS_WIDTH + 30; x += 74) {
     const wave = Math.sin(time * 0.004 + x) * 5
-    ctx.fillRect(x, 478 + wave, 42, 3)
+    ctx.fillRect(x, lavaTop + 3 + wave, 42, 3)
   }
   ctx.globalAlpha = 1
   // Distant volcanic vents and bursts make the lower room read as dangerous.
   ctx.fillStyle = '#351b2a'
-  ctx.beginPath(); ctx.moveTo(430, 475); ctx.lineTo(470, 410); ctx.lineTo(512, 475); ctx.closePath(); ctx.fill()
+  ctx.beginPath(); ctx.moveTo(430, lavaTop); ctx.lineTo(470, lavaTop - 65); ctx.lineTo(512, lavaTop); ctx.closePath(); ctx.fill()
   ctx.fillStyle = '#f58a35'
-  ctx.fillRect(469, 422, 6, 12); ctx.fillRect(480, 433, 4, 9)
+  ctx.fillRect(469, lavaTop - 53, 6, 12); ctx.fillRect(480, lavaTop - 42, 4, 9)
   ctx.fillStyle = '#ffcb58'
-  ctx.fillRect(466, 411 + Math.round(Math.sin(time * 0.008) * 4), 5, 7)
-  ctx.fillRect(487, 421 + Math.round(Math.sin(time * 0.01 + 1) * 3), 4, 6)
+  ctx.fillRect(466, lavaTop - 64 + Math.round(Math.sin(time * 0.008) * 4), 5, 7)
+  ctx.fillRect(487, lavaTop - 54 + Math.round(Math.sin(time * 0.01 + 1) * 3), 4, 6)
 }
 
 function drawBackground(ctx, time) {
@@ -257,6 +289,79 @@ function drawBackground(ctx, time) {
   ctx.globalAlpha = 1
 }
 
+function drawForestBackground(ctx, time) {
+  const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT)
+  gradient.addColorStop(0, '#102b34')
+  gradient.addColorStop(0.55, '#1b4b3d')
+  gradient.addColorStop(1, '#0d211f')
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+
+  // A moonlit canopy replaces the temple silhouette from Chamber 7 onward.
+  ctx.fillStyle = '#b8d6ad'
+  ctx.globalAlpha = 0.85
+  ctx.beginPath(); ctx.arc(790, 82, 42, 0, Math.PI * 2); ctx.fill()
+  ctx.globalAlpha = 1
+  ctx.fillStyle = '#d8efc0'
+  ctx.fillRect(774, 70, 8, 3); ctx.fillRect(802, 94, 6, 3); ctx.fillRect(785, 103, 4, 2)
+
+  // Distant layered tree line.
+  ctx.fillStyle = '#12332f'
+  ctx.fillRect(0, 230, CANVAS_WIDTH, 270)
+  for (let x = -35; x < CANVAS_WIDTH + 50; x += 74) {
+    const height = 90 + (Math.abs(x) % 5) * 15
+    ctx.fillStyle = x % 3 === 0 ? '#174039' : '#153a35'
+    ctx.fillRect(x + 28, 315 - height / 2, 10, height + 90)
+    ctx.beginPath()
+    ctx.moveTo(x + 33, 210 - height / 2)
+    ctx.lineTo(x - 4, 315 - height / 2)
+    ctx.lineTo(x + 70, 315 - height / 2)
+    ctx.closePath(); ctx.fill()
+    ctx.beginPath()
+    ctx.moveTo(x + 33, 245 - height / 2)
+    ctx.lineTo(x - 12, 350 - height / 2)
+    ctx.lineTo(x + 78, 350 - height / 2)
+    ctx.closePath(); ctx.fill()
+  }
+
+  // Soft mist bands make the new area read deeper than the temple rooms.
+  ctx.globalAlpha = 0.12
+  ctx.fillStyle = '#a6d2a0'
+  ctx.fillRect(0, 292 + Math.sin(time * 0.001) * 5, CANVAS_WIDTH, 18)
+  ctx.fillRect(0, 388 + Math.sin(time * 0.0013 + 1) * 5, CANVAS_WIDTH, 12)
+  ctx.globalAlpha = 1
+
+  // Fireflies replace the floating temple dust.
+  for (let i = 0; i < 24; i++) {
+    const x = (i * 97 + time * (3 + i % 3)) % 990 - 15
+    const y = 130 + ((i * 53) % 300) + Math.sin(time * 0.003 + i) * 8
+    ctx.globalAlpha = 0.35 + Math.abs(Math.sin(time * 0.006 + i)) * 0.5
+    ctx.fillStyle = i % 2 ? '#d6ec8f' : '#f5d873'
+    ctx.fillRect(x, y, 3, 3)
+  }
+  ctx.globalAlpha = 1
+}
+
+function drawForestDetails(ctx) {
+  // Foreground trunks and hanging vines frame the playable room.
+  for (const x of [12, 920]) {
+    ctx.fillStyle = '#142b27'
+    ctx.fillRect(x, 130, 30, 370)
+    ctx.fillStyle = '#285344'
+    ctx.fillRect(x + 7, 138, 8, 350)
+    ctx.fillStyle = '#3d7252'
+    ctx.fillRect(x - 8, 128, 46, 12)
+  }
+  ctx.strokeStyle = '#376d4f'
+  ctx.lineWidth = 4
+  for (const x of [104, 238, 706, 850]) {
+    ctx.beginPath(); ctx.moveTo(x, 125); ctx.quadraticCurveTo(x - 12, 185, x + 5, 245); ctx.stroke()
+    ctx.lineWidth = 2
+    ctx.beginPath(); ctx.moveTo(x + 5, 175); ctx.quadraticCurveTo(x + 25, 205, x + 13, 230); ctx.stroke()
+    ctx.lineWidth = 4
+  }
+}
+
 function drawTempleDetails(ctx) {
   // Pillars
   for (const x of [18, 920]) {
@@ -294,25 +399,25 @@ function drawTorch(ctx, x, y) {
   ctx.globalAlpha = 1
 }
 
-function drawPlatform(ctx, p) {
-  ctx.fillStyle = '#111a2b'
+function drawPlatform(ctx, p, forest = false) {
+  ctx.fillStyle = forest ? '#10261f' : '#111a2b'
   ctx.fillRect(p.x, p.y + 5, p.w, p.h + 8)
-  ctx.fillStyle = '#69718b'
+  ctx.fillStyle = forest ? '#496e57' : '#69718b'
   ctx.fillRect(p.x, p.y, p.w, 8)
-  ctx.fillStyle = '#a5a28b'
+  ctx.fillStyle = forest ? '#91a86c' : '#a5a28b'
   ctx.fillRect(p.x + 2, p.y, p.w - 4, 3)
-  ctx.fillStyle = '#424d68'
+  ctx.fillStyle = forest ? '#2d4d3d' : '#424d68'
   ctx.fillRect(p.x, p.y + 8, p.w, p.h - 2)
-  ctx.fillStyle = '#536079'
+  ctx.fillStyle = forest ? '#56734e' : '#536079'
   for (let x = p.x + 16; x < p.x + p.w - 5; x += 42) ctx.fillRect(x, p.y + 9, 2, 8)
 }
 
-function drawLadder(ctx, ladder) {
-  ctx.fillStyle = '#9a8054'
+function drawLadder(ctx, ladder, forest = false) {
+  ctx.fillStyle = forest ? '#6f6543' : '#9a8054'
   ctx.fillRect(ladder.x, ladder.y, 5, ladder.h)
   ctx.fillRect(ladder.x + 25, ladder.y, 5, ladder.h)
   for (let y = ladder.y + 6; y < ladder.y + ladder.h; y += 15) ctx.fillRect(ladder.x, y, 30, 4)
-  ctx.fillStyle = '#c0a16a'
+  ctx.fillStyle = forest ? '#a09a5a' : '#c0a16a'
   ctx.fillRect(ladder.x + 2, ladder.y, 3, ladder.h)
 }
 
@@ -638,11 +743,12 @@ function TempleCanvas({ running, paused, onScore, onHud, onWin, onDoorEnter, onC
 
   const resetGame = useCallback(() => {
     const coins = makeCoins(level)
+    const enemies = placeEnemiesOnPlatforms(makeEnemies(level), level)
     gameRef.current = {
       level,
       player: { x: 52, y: 455, w: 30, h: 43, vx: 0, vy: 0, dir: 1, onGround: false, onLadder: null, coyote: 0, jumpLock: false, invuln: 0, grown: false, shield: 0, jumpStrength: -10.8 },
       mouse: { x: 480, y: 270, active: false, down: false },
-      enemies: makeEnemies(level), key: makeKey(level), fireballs: makeFireballs(level), ammoPickups: makeAmmoPickups(level), healthPickups: makeHealthPickups(level), bricks: makeBreakableBricks(level), powerups: [], enemyShots: [], coins, coinTotal: coins.length, coinsCollected: 0, bullets: [], sparks: [], muzzle: null, lastShot: 0, score: 0, hearts: MAX_HEARTS, kills: 0, ammo: getStartingAmmo(level), time: 0, doorTriggered: false, gameOver: false,
+      enemies, key: makeKey(level), fireballs: makeFireballs(level), lavaTop: level === 6 ? 505 : null, ammoPickups: makeAmmoPickups(level), healthPickups: makeHealthPickups(level), bricks: makeBreakableBricks(level), powerups: [], enemyShots: [], coins, coinTotal: coins.length, coinsCollected: 0, bullets: [], sparks: [], muzzle: null, lastShot: 0, score: 0, hearts: MAX_HEARTS, kills: 0, ammo: getStartingAmmo(level), time: 0, doorTriggered: false, gameOver: false,
     }
   }, [level])
 
@@ -722,7 +828,10 @@ function breakBrick(game, brick) {
 
 function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter, onCoinCollected, onGameOver) {
   const p = game.player
+  // Keep HUD/gameplay state numeric even if a malformed level or stale game state slips through.
+  if (!Number.isFinite(game.ammo)) game.ammo = getStartingAmmo(game.level)
   const levelPlatforms = getPlatforms(game.level)
+  if (game.level === 6) game.lavaTop = Math.max(475, game.lavaTop - 0.035 * dt)
   game.time += dt
   const left = keys.has('a') || keys.has('arrowleft')
   const right = keys.has('d') || keys.has('arrowright')
@@ -827,6 +936,7 @@ function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter, onC
   if (p.shield > 0) p.shield -= dt * 16.67
 
   for (const fireball of game.fireballs) {
+    if (game.level === 6) fireball.y = game.lavaTop + 3
     fireball.x -= fireball.speed * dt
     fireball.angle -= (fireball.speed / fireball.radius) * dt
     if (fireball.x < -fireball.radius * 2) fireball.x = CANVAS_WIDTH + 45 + fireball.id * 120
@@ -841,7 +951,7 @@ function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter, onC
     const pickupHitbox = { x: pickup.x - 16, y: pickup.y - 13, w: 32, h: 26 }
     if (!pickup.collected && rectsOverlap(p, pickupHitbox)) {
       pickup.collected = true
-      game.ammo += pickup.amount
+      game.ammo += Number.isFinite(pickup.amount) ? pickup.amount : 0
       game.score += 25
       game.sparks.push({ x: pickup.x, y: pickup.y, life: 18, coin: true })
       onScore(game.score)
@@ -931,7 +1041,15 @@ function updateGame(game, keys, dt, now, onHud, onScore, onWin, onDoorEnter, onC
     if (Math.abs(distance) < 230 && Math.abs(p.y - enemy.y) < 90) enemy.dir = distance > 0 ? 1 : -1
     enemy.vy += 0.52 * dt
     enemy.x += (Math.abs(distance) < 230 ? enemy.dir * (enemy.speed || 0.7) : 0) * dt
-    enemy.x = Math.max(4, Math.min(930, enemy.x))
+    const patrolMin = enemy.patrolMin ?? 4
+    const patrolMax = enemy.patrolMax ?? 930
+    if (enemy.x <= patrolMin) {
+      enemy.x = patrolMin
+      enemy.dir = 1
+    } else if (enemy.x >= patrolMax) {
+      enemy.x = patrolMax
+      enemy.dir = -1
+    }
     const oldEnemyBottom = enemy.y + enemy.h
     enemy.y += enemy.vy * dt
     for (const platform of levelPlatforms) {
@@ -1014,12 +1132,15 @@ function damagePlayer(game, onHud, onGameOver) {
 }
 
 function drawGame(ctx, game, now, dress) {
-  drawBackground(ctx, now)
-  drawTempleDetails(ctx)
-  if (game.level === 6) drawVolcanicFloor(ctx, now)
+  const forestTheme = game.level >= 7
+  if (forestTheme) drawForestBackground(ctx, now)
+  else drawBackground(ctx, now)
+  if (forestTheme) drawForestDetails(ctx)
+  else drawTempleDetails(ctx)
+  if (game.level === 6) drawVolcanicFloor(ctx, now, game.lavaTop)
   const levelPlatforms = getPlatforms(game.level)
-  for (const ladder of ladders) drawLadder(ctx, ladder)
-  for (const platform of levelPlatforms) drawPlatform(ctx, platform)
+  for (const ladder of ladders) drawLadder(ctx, ladder, forestTheme)
+  for (const platform of levelPlatforms) drawPlatform(ctx, platform, forestTheme)
   for (const fireball of game.fireballs) drawFireball(ctx, fireball, now)
   for (const brick of game.bricks || []) drawBreakableBrick(ctx, brick, now)
   for (const powerup of game.powerups || []) drawPowerup(ctx, powerup, now)
@@ -1029,6 +1150,12 @@ function drawGame(ctx, game, now, dress) {
   const chamberCleared = game.enemies.every((enemy) => !enemy.alive)
   drawKey(ctx, game.key, now, chamberCleared)
   drawDoor(ctx, chamberCleared && game.key.collected)
+  if (game.level === 6) {
+    drawText(ctx, 'LAVA RISES // REACH THE EXIT', 35, 95, 10, '#ffcf6a')
+    ctx.fillStyle = '#3a2630'; ctx.fillRect(35, 106, 150, 5)
+    ctx.fillStyle = '#e15d32'
+    ctx.fillRect(35, 106, 150 * Math.max(0, Math.min(1, (505 - game.lavaTop) / 30)), 5)
+  }
   for (const spark of game.sparks) {
     const size = spark.coin ? 5 : 4
     ctx.fillStyle = spark.coin ? '#eac25b' : '#ffdc77'
@@ -1309,9 +1436,10 @@ function App() {
   }, [])
 
   const startLevel = (nextLevel = 1) => {
-    levelAttemptsRef.current[nextLevel] = (levelAttemptsRef.current[nextLevel] || 0) + 1
-    setLevel(nextLevel)
-    setHud({ ...initialHud, level: nextLevel, total: makeEnemies(nextLevel).length, ammo: getStartingAmmo(nextLevel), coinTotal: makeCoins(nextLevel).length })
+    const chamber = getSafeLevel(nextLevel)
+    levelAttemptsRef.current[chamber] = (levelAttemptsRef.current[chamber] || 0) + 1
+    setLevel(chamber)
+    setHud({ ...initialHud, level: chamber, total: makeEnemies(chamber).length, ammo: getStartingAmmo(chamber), coinTotal: makeCoins(chamber).length })
     setWon(false); setGameOver(false); setDoorOpen(false); setPaused(false); setShowHome(false); setShowMap(false); setShowShop(false); setShowHelp(false); setRunning(true)
     setResetKey((key) => key + 1)
   }
